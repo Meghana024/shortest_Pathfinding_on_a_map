@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Path Finder</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        #map { 
+            height: 70vh;
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .custom-popup {
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            padding: 10px;
+        }
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h1 class="text-3xl font-bold text-gray-800 mb-4">Advanced Path Finder</h1>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="p-4 bg-blue-50 rounded-lg">
+                    <h3 class="font-semibold text-blue-800">Distance</h3>
+                    <p id="distance" class="text-2xl text-blue-600">-- km</p>
+                </div>
+                <div class="p-4 bg-green-50 rounded-lg">
+                    <h3 class="font-semibold text-green-800">Estimated Time</h3>
+                    <p id="time" class="text-2xl text-green-600">-- min</p>
+                </div>
+                <div class="p-4 bg-purple-50 rounded-lg">
+                    <h3 class="font-semibold text-purple-800">Turn Points</h3>
+                    <p id="turns" class="text-2xl text-purple-600">--</p>
+                </div>
+            </div>
+            
+            <div class="flex flex-wrap gap-4 mb-6">
+                <button id="findPathButton" class="hidden px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                    Calculate Route
+                </button>
+                <button id="resetButton" class="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                    Reset Map
+                </button>
+                <button id="centerButton" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    Center Map
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <div class="loading bg-white p-4 rounded-lg shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            <p class="text-gray-700">Calculating best route...</p>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        let map, startMarker, endMarker, routePath;
+        let markers = [];
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([19.6720, 78.5320], 13); // Center on Adilabad
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            // Add click handler
+            map.on('click', handleMapClick);
+        }
+
+        function handleMapClick(e) {
+            if (!startMarker) {
+                startMarker = addMarker(e.latlng, 'Start Point', 'green');
+                markers.push(startMarker);
+            } else if (!endMarker) {
+                endMarker = addMarker(e.latlng, 'End Point', 'red');
+                markers.push(endMarker);
+                document.getElementById('findPathButton').classList.remove('hidden');
+            }
+        }
+
+        function addMarker(latlng, title, color) {
+            const markerIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            return L.marker(latlng, {icon: markerIcon})
+                .addTo(map)
+                .bindPopup(title, {className: 'custom-popup'});
+        }
+
+        function showLoading() {
+            document.querySelector('.loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.querySelector('.loading').style.display = 'none';
+        }
+
+        function resetMap() {
+            if (routePath) {
+                map.removeLayer(routePath);
+            }
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            startMarker = null;
+            endMarker = null;
+            document.getElementById('findPathButton').classList.add('hidden');
+            document.getElementById('distance').textContent = '-- km';
+            document.getElementById('time').textContent = '-- min';
+            document.getElementById('turns').textContent = '--';
+        }
+
+        function centerMap() {
+            map.setView([19.6720, 78.5320], 13);
+        }
+
+        async function findPath(start, end) {
+            showLoading();
+            try {
+                const response = await fetch('/find_path', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        start_lat: start.lat,
+                        start_lon: start.lng,
+                        end_lat: end.lat,
+                        end_lon: end.lng
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.path) {
+                    // Clear existing path
+                    if (routePath) {
+                        map.removeLayer(routePath);
+                    }
+
+                    // Draw new path
+                    const latlngs = data.path.map(coord => [coord.lat, coord.lon]);
+                    routePath = L.polyline(latlngs, {
+                        color: '#4A90E2',
+                        weight: 5,
+                        opacity: 0.7
+                    }).addTo(map);
+
+                    // Update stats
+                    document.getElementById('distance').textContent = `${data.distance} km`;
+                    document.getElementById('time').textContent = `${data.estimated_time} min`;
+                    document.getElementById('turns').textContent = data.turn_points.length;
+
+                    // Add turn point markers
+                    data.turn_points.forEach(point => {
+                        const turnMarker = addMarker([point.lat, point.lon], 'Turn Point', 'yellow');
+                        markers.push(turnMarker);
+                    });
+
+                    // Fit map to show the entire route
+                    map.fitBounds(routePath.getBounds(), {padding: [50, 50]});
+                } else {
+                    alert('No path found between the selected points.');
+                }
+            } catch (error) {
+                console.error('Error:', error                );
+                alert('An error occurred while calculating the route. Please try again.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Event listeners
+        document.getElementById('findPathButton').addEventListener('click', () => {
+            if (startMarker && endMarker) {
+                findPath(startMarker.getLatLng(), endMarker.getLatLng());
+            } else {
+                alert('Please select both start and end points.');
+            }
+        });
+
+        document.getElementById('resetButton').addEventListener('click', resetMap);
+        document.getElementById('centerButton').addEventListener('click', centerMap);
+
+        // Initialize map on page load
+        initMap();
+    </script>
+</body>
+</html>
